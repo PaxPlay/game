@@ -188,6 +188,7 @@ class CClientTimesDisplay : public vgui::EditablePanel, public IViewPortPanel, p
     vgui::Button *m_pGlobalTop10Button;
     vgui::Button *m_pGlobalAroundButton;
     vgui::Button *m_pFriendsLeaderboardsButton;
+    vgui::HTML *m_pChartedTimesPanel;
 
     vgui::ToggleButton *m_pRunFilterButton;
     EditablePanel *m_pFilterPanel;
@@ -322,5 +323,7 @@ class CClientTimesDisplay : public vgui::EditablePanel, public IViewPortPanel, p
     Color m_cFirstPlace, m_cSecondPlace, m_cThirdPlace;
 
     RUN_FLAG flaggedRuns;
+
+    uint64 m_ui64LocalSteamID;
 };
 #endif // CLIENTSCOREBOARDDIALOG_H

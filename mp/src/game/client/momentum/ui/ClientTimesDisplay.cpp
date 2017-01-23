@@ -110,6 +110,7 @@ CClientTimesDisplay::CClientTimesDisplay(IViewPort *pViewPort) :
     m_pLocalLeaderboardsButton = FindControl<Button>("LocalLeaderboardsButton", true);
     m_pRunFilterButton = FindControl<ToggleButton>("FilterButton", true);
     m_pFilterPanel = FindControl<EditablePanel>("FilterPanel", true);
+    m_pChartedTimesPanel = new HTML(this, "ChartedTimesPanel", true);
 
     m_pFilterPanel->LoadControlSettings("resource/ui/leaderboards_filter.res");
 
@@ -119,7 +120,7 @@ CClientTimesDisplay::CClientTimesDisplay(IViewPort *pViewPort) :
         !m_pPlayerMapRank || !m_pPlayerGlobalRank || !m_pLeaderboards || !m_pOnlineLeaderboards ||
         !m_pLocalLeaderboards || !m_pFriendsLeaderboards || !m_pPlayerPersonalBest || !m_pLoadingOnlineTimes ||
         !m_pPlayerExperience || !m_pGlobalLeaderboardsButton || !m_pFriendsLeaderboardsButton ||
-        !m_pGlobalTop10Button || !m_pGlobalAroundButton)
+        !m_pGlobalTop10Button || !m_pGlobalAroundButton || !m_pChartedTimesPanel)
     {
         Assert("Null pointer(s) on scoreboards");
     }
@@ -146,12 +147,23 @@ CClientTimesDisplay::CClientTimesDisplay(IViewPort *pViewPort) :
     m_pFriendsLeaderboardsButton->SetParent(m_pLeaderboards);
     m_pLocalLeaderboardsButton->SetParent(m_pLeaderboards);
     m_pRunFilterButton->SetParent(m_pLeaderboards);
+    m_pChartedTimesPanel->SetParent(m_pPlayerStats);
 
     // Get rid of the scrollbars for the panels
     // MOM_TODO: Do we want the player to be able to explore the ranks?
     m_pOnlineLeaderboards->SetVerticalScrollbar(false);
     m_pLocalLeaderboards->SetVerticalScrollbar(false);
     m_pFriendsLeaderboards->SetVerticalScrollbar(false);
+
+    m_pChartedTimesPanel->AddActionSignalTarget(this);
+    m_pChartedTimesPanel->SetScrollbarsEnabled(false);
+    m_pChartedTimesPanel->SetContextMenuEnabled(false);
+    m_pChartedTimesPanel->SetViewSourceEnabled(false);
+
+    m_pChartedTimesPanel->SetPos(3, m_pPlayerStats->GetTall() / 2);
+    m_pChartedTimesPanel->SetSize(m_pPlayerStats->GetWide() - 6, m_pPlayerStats->GetTall() / 2 - 5);
+
+    m_pChartedTimesPanel->SetVisible(false);
 
     m_pMomentumLogo->GetImage()->SetSize(scheme()->GetProportionalScaledValue(256),
                                          scheme()->GetProportionalScaledValue(64));
@@ -207,6 +219,12 @@ CClientTimesDisplay::~CClientTimesDisplay()
 
     if (cbGetPlayerDataForMapCallback.IsActive())
         cbGetPlayerDataForMapCallback.Cancel();
+
+    if (m_pChartedTimesPanel)
+    {
+        delete m_pChartedTimesPanel;
+        m_pChartedTimesPanel = nullptr;
+    }
     // MOM_TODO: Ensure a good destructor
 }
 
@@ -568,6 +586,10 @@ void CClientTimesDisplay::UpdatePlayerInfo(KeyValues *kv, bool fullUpdate)
     engine->GetPlayerInfo(engine->GetLocalPlayer(), &pi);
     const char *oldName = playerData->GetString("name", pi.name);
 
+    m_ui64LocalSteamID = GetSteamIDForPlayerIndex(GetLocalPlayerIndex()).ConvertToUint64();
+
+    
+
     char newName[MAX_PLAYER_NAME_LENGTH];
     UTIL_MakeSafeName(oldName, newName, MAX_PLAYER_NAME_LENGTH);
     playerData->SetString("name", newName);
@@ -608,11 +630,22 @@ void CClientTimesDisplay::UpdatePlayerInfo(KeyValues *kv, bool fullUpdate)
         m_pPlayerPersonalBest->SetText(pbLocalized);
         m_pPlayerExperience->SetText(xpLocalized);
 
-        char requrl[MAX_PATH];
-        // Mapname, tickrate, rank, radius
-        Q_snprintf(requrl, MAX_PATH, "%s/getusermaprank/%s/%llu", MOM_APIDOMAIN, g_pGameRules->MapName(),
-                   GetSteamIDForPlayerIndex(GetLocalPlayerIndex()).ConvertToUint64());
-        CreateAndSendHTTPReq(requrl, &cbGetPlayerDataForMapCallback, &CClientTimesDisplay::GetPlayerDataForMapCallback);
+        if (m_ui64LocalSteamID != 0)
+        {
+            char szUrl[BUFSIZ];
+            Q_snprintf(szUrl, BUFSIZ, "%s/leaderboards/charts/%d/%s/%llu", MOM_APIDOMAIN, 1, g_pGameRules->MapName(), m_ui64LocalSteamID);
+            m_pChartedTimesPanel->OpenURL(szUrl, nullptr);
+
+            m_pChartedTimesPanel->SetVisible(true);
+
+            char requrl[MAX_PATH];
+            // Mapname, tickrate, rank, radius
+            Q_snprintf(requrl, MAX_PATH, "%s/getusermaprank/%s/%llu", MOM_APIDOMAIN, g_pGameRules->MapName(),
+                m_ui64LocalSteamID);
+            CreateAndSendHTTPReq(requrl, &cbGetPlayerDataForMapCallback, &CClientTimesDisplay::GetPlayerDataForMapCallback);
+        }
+
+        
         m_fLastHeaderUpdate = gpGlobals->curtime;
     }
 
@@ -797,7 +830,7 @@ void CClientTimesDisplay::LoadOnlineTimes()
             Q_strcat(format, "/%llu", sizeof("/%llu"));
 
         Q_snprintf(requrl, BUFSIZ, format, MOM_APIDOMAIN, m_bGetTop10Scores ? 1 : 2, g_pGameRules->MapName(),
-                   flaggedRuns, GetSteamIDForPlayerIndex(GetLocalPlayerIndex()).ConvertToUint64());
+            flaggedRuns, m_ui64LocalSteamID);
 
         // This url is not real, just for testing purposes. It returns a json list with the serialization of the scores
         CreateAndSendHTTPReq(requrl, &cbGetOnlineTimesCallback, &CClientTimesDisplay::GetOnlineTimesCallback);
@@ -814,8 +847,7 @@ void CClientTimesDisplay::LoadFriendsTimes()
     {
         char requrl[BUFSIZ];
         Q_snprintf(requrl, BUFSIZ, "%s/getfriendscores/%llu/10/1/%s/%d", MOM_APIDOMAIN,
-                   GetSteamIDForPlayerIndex(GetLocalPlayerIndex()).ConvertToUint64(), g_pGameRules->MapName(),
-                   flaggedRuns);
+            m_ui64LocalSteamID, g_pGameRules->MapName(), flaggedRuns);
         CreateAndSendHTTPReq(requrl, &cbGetFriendsTimesCallback, &CClientTimesDisplay::GetFriendsTimesCallback);
         m_bFriendsNeedUpdate = false;
         m_flLastFriendsTimeUpdate = gpGlobals->curtime;
